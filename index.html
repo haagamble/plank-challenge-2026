@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2d6a4f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Plank">
+<title>Plank Challenge 💪</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="plank-challenge.css">
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>💪 Plank challenge</h1>
+    <p>6 weeks · 42 days · 5-minute plank</p>
+  </header>
+
+  <div id="testBanner" class="test-banner hidden">
+    <span><strong>Test mode</strong> — changes stay in this browser.</span>
+    <button class="btn" type="button" onclick="resetTestData()">Reset test data</button>
+  </div>
+
+  <div id="mainApp">
+    <!-- Join box: only shown to people with the invite link -->
+    <div id="joinBox" class="join-box hidden">
+      <h2>Join the challenge</h2>
+      <p>Enter your name to add yourself to the group.</p>
+      <div class="join-row">
+        <input type="text" id="joinName" placeholder="Your name" maxlength="30">
+        <button class="btn primary" onclick="joinChallenge()">Join</button>
+      </div>
+    </div>
+
+    <div class="section-label hidden" id="nameLabel">Who are you?</div>
+    <div class="name-grid hidden" id="nameGrid"></div>
+    <div class="name-status" id="nameStatus">
+      <strong>Loading the challenge…</strong>
+    </div>
+    <div class="identity-note hidden" id="identityNote"></div>
+
+    <div id="playerContent" class="hidden">
+      <div class="stat-row" id="statRow"></div>
+      <div class="tabs">
+        <button class="tab active" onclick="showTab('plan')">My plan</button>
+        <button class="tab" onclick="showTab('group')">Group progress</button>
+      </div>
+      <div id="planView">
+        <div id="planLoading" style="color:var(--text-muted);font-size:14px;padding:1rem 0">Loading...</div>
+        <div class="plan-grid" id="planGrid"></div>
+      </div>
+      <div id="groupView" class="hidden">
+        <div class="leaderboard" id="leaderboard"></div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="install-card hidden" id="installCard">
+    <div>
+      <strong>Keep the challenge handy</strong>
+      <span id="installMessage">Install it on your phone for quick daily access.</span>
+    </div>
+    <button class="btn primary hidden" id="installButton" type="button">Install app</button>
+    <button class="install-dismiss" id="installDismiss" type="button" aria-label="Dismiss install suggestion">×</button>
+  </aside>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="plank-challenge.js"></script>
+</body>
+</html>
