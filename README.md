@@ -9,7 +9,7 @@ their phone like an app.
 - 42-day plank schedule with rest days
 - Shared progress stored in Firebase Realtime Database
 - Group leaderboard
-- Device-linked participant identity
+- Anonymous Firebase identity with owner-only writes
 - Browser-only test mode that does not change Firebase data
 - Installable Progressive Web App (PWA)
 - Light and dark color schemes
@@ -51,28 +51,54 @@ After deployment, share the site URL with the join parameter:
 https://YOUR-SITE-URL/?join=plank26
 ```
 
-The first participant selected on a device is remembered as that device's user.
-Their plan is editable, while other participants' plans are view-only. The
-**Change user** option supports shared devices.
+Firebase anonymously identifies each device. A participant can edit only the
+record owned by that Firebase user ID; other participants' plans are
+server-enforced as read-only. Clearing the site's browser data creates a new
+identity, so do not clear it during the challenge.
 
-## Firebase
+## Firebase setup
 
-The Firebase Realtime Database URL and join code are configured near the top of
-`plank-challenge.js`. Live participant data is stored under the `/plank` node.
+Complete these steps before publishing the live app:
 
-To clear live test data, open Firebase Console, go to **Realtime Database →
-Data**, and delete the `/plank` node. Delete only that node, not the database.
+1. In Firebase Console, open **Project settings → General → Your apps**.
+   Register a Web app if one is not already present.
+2. Copy its Web API key into `firebase-config.js`, replacing
+   `REPLACE_WITH_FIREBASE_WEB_API_KEY`. Firebase Web API keys identify the
+   project; they are not secret credentials.
+3. Open **Authentication → Sign-in method** and enable **Anonymous**.
+   Do not enable automatic cleanup of anonymous accounts during this 42-day
+   challenge.
+4. Open **Realtime Database → Rules**, paste the contents of
+   `database.rules.json`, and publish the rules.
+5. In **Realtime Database → Data**, delete the old `/plank` test data.
+6. At the database root, create `/settings/joinOpen` with the Boolean value
+   `true`.
+
+Once every participant has joined, change `/settings/joinOpen` to `false` in
+Firebase Console. Existing participants can continue updating their own
+progress, but the database rules will reject new participant records.
+
+The rules may instead be deployed with Firebase CLI:
+
+```powershell
+firebase deploy --only database
+```
+
+Live participant data is stored under `/plank/{firebaseUserId}`.
 
 ## Deploy with GitHub Pages
 
 1. Push the project to a GitHub repository.
 2. Enable GitHub Pages for the repository's main branch and root folder.
 3. Open the published URL and confirm Firebase loads correctly.
-4. Test joining, updating progress, viewing another participant, and installing
+4. Verify that anonymous authentication is enabled, the database rules are
+   published, and `/settings/joinOpen` is `true`.
+5. Test joining, updating progress, viewing another participant, and installing
    the app before sharing the invitation link.
 
-All project files, including `manifest.webmanifest`, `service-worker.js`, and
-the `icons/` folder, must be included in the repository.
+All project files, including `firebase-config.js`, `manifest.webmanifest`,
+`service-worker.js`, and the `icons/` folder, must be included in the
+repository.
 
 ## Install on a phone
 
@@ -86,7 +112,15 @@ still requires an internet connection.
 
 ## Security note
 
-This app is designed for a trusted small group. Remembering a participant on
-their device prevents accidental edits to someone else's plan, but it is not
-authentication. Anyone deliberately bypassing the interface may still be able
-to access Firebase if the database rules allow public reads and writes.
+Firebase Authentication and Realtime Database Rules enforce ownership on the
+server. Editing HTML or JavaScript in browser developer tools does not grant
+permission to modify another participant's record.
+
+This is still a small-group design:
+
+- The invitation code is client-side and is not a secret.
+- Authenticated visitors can read names and challenge progress for the
+  leaderboard.
+- A visitor can create their own participant record while `joinOpen` is true.
+- App Check can be added later as an additional abuse-prevention layer, but it
+  does not replace Authentication or Security Rules.

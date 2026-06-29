@@ -1,6 +1,7 @@
 # Local development tools
 .agents/
 .vscode/
+.firebase/
 
 # Environment files
 .env

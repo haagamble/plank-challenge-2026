@@ -1,0 +1,29 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "settings": {
+      ".read": true,
+      ".write": false
+    },
+    "plank": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid && (data.exists() || root.child('settings/joinOpen').val() === true)",
+        ".validate": "newData.hasChild('name')",
+        "name": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 30"
+        },
+        "completed": {
+          ".validate": "newData.hasChildren()",
+          "$day": {
+            ".validate": "$day.matches(/^([1-9]|[1-3][0-9]|4[0-2])$/) && newData.val() === true"
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}

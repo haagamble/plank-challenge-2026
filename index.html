@@ -22,7 +22,7 @@
 
   <div id="testBanner" class="test-banner hidden">
     <span><strong>Test mode</strong> — changes stay in this browser.</span>
-    <button class="btn" type="button" onclick="resetTestData()">Reset test data</button>
+    <button class="btn" id="resetTestButton" type="button">Reset test data</button>
   </div>
 
   <div id="mainApp">
@@ -32,7 +32,7 @@
       <p>Enter your name to add yourself to the group.</p>
       <div class="join-row">
         <input type="text" id="joinName" placeholder="Your name" maxlength="30">
-        <button class="btn primary" onclick="joinChallenge()">Join</button>
+        <button class="btn primary" id="joinButton" type="button">Join</button>
       </div>
     </div>
 
@@ -46,8 +46,8 @@
     <div id="playerContent" class="hidden">
       <div class="stat-row" id="statRow"></div>
       <div class="tabs">
-        <button class="tab active" onclick="showTab('plan')">My plan</button>
-        <button class="tab" onclick="showTab('group')">Group progress</button>
+        <button class="tab active" data-tab="plan" type="button">My plan</button>
+        <button class="tab" data-tab="group" type="button">Group progress</button>
       </div>
       <div id="planView">
         <div id="planLoading" style="color:var(--text-muted);font-size:14px;padding:1rem 0">Loading...</div>
@@ -70,6 +70,7 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="firebase-config.js"></script>
 <script src="plank-challenge.js"></script>
 </body>
 </html>

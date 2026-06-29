@@ -1,12 +1,12 @@
 // ─── CONFIGURATION ────────────────────────────────────────────────────────────
 const DB_URL   = 'https://plank-challenge-2026-default-rtdb.firebaseio.com';
 const JOIN_CODE = 'plank26';
+const FIREBASE_API_KEY = window.PLANK_FIREBASE_CONFIG?.apiKey || '';
 const QUERY_PARAMS = new URLSearchParams(window.location.search);
 const TEST_MODE = QUERY_PARAMS.get('test') === '1';
 const TEST_STORAGE_KEY = 'plank-challenge-test-data';
-const IDENTITY_STORAGE_KEY = TEST_MODE
-  ? 'plank-challenge-test-player'
-  : 'plank-challenge-player';
+const TEST_IDENTITY_STORAGE_KEY = 'plank-challenge-test-player';
+const AUTH_STORAGE_KEY = 'plank-challenge-firebase-auth';
 
 const PLAN = [
   {d:1,t:'0:20'},{d:2,t:'0:20'},{d:3,t:'0:30'},{d:4,t:'0:30'},{d:5,t:'0:45'},{d:6,t:'0:55'},{d:7,t:'REST'},
@@ -32,9 +32,13 @@ const MEDALS   = ['🥇','🥈','🥉'];
 let players     = [];   // loaded from Firebase
 let currentPlayer = null;
 let allData     = {};
+let playerUids  = {};
 let hasInvite   = false;
+let joinOpen    = false;
 let loadState   = 'loading';
-let ownedPlayer = localStorage.getItem(IDENTITY_STORAGE_KEY);
+let ownedPlayer = TEST_MODE ? localStorage.getItem(TEST_IDENTITY_STORAGE_KEY) : null;
+let authSession = null;
+let authPromise = null;
 let installPrompt = null;
 
 // ─── INVITE CODE CHECK ────────────────────────────────────────────────────────
@@ -42,11 +46,100 @@ function checkInvite() {
   hasInvite = TEST_MODE || QUERY_PARAMS.get('join') === JOIN_CODE;
 }
 
-// ─── FIREBASE REST API ────────────────────────────────────────────────────────
-function playerKey(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '_'); }
+// ─── FIREBASE AUTHENTICATION AND REST API ─────────────────────────────────────
 function escapeHtml(value) {
   const chars = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   return String(value).replace(/[&<>"']/g, char => chars[char]);
+}
+
+function storeAuthSession(data) {
+  const expiresIn = Number(data.expiresIn || data.expires_in || 3600);
+  authSession = {
+    idToken: data.idToken || data.id_token,
+    refreshToken: data.refreshToken || data.refresh_token,
+    localId: data.localId || data.user_id,
+    expiresAt: Date.now() + (expiresIn * 1000) - 60000
+  };
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authSession));
+  return authSession;
+}
+
+function readAuthSession() {
+  if (authSession) return authSession;
+  try {
+    authSession = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null');
+  } catch {
+    authSession = null;
+  }
+  return authSession;
+}
+
+async function createAnonymousAccount() {
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(FIREBASE_API_KEY)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ returnSecureToken: true })
+    }
+  );
+  if (!response.ok) throw new Error('Anonymous Firebase Authentication is not enabled.');
+  return storeAuthSession(await response.json());
+}
+
+async function refreshAnonymousAccount(session) {
+  const response = await fetch(
+    `https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(FIREBASE_API_KEY)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: session.refreshToken
+      })
+    }
+  );
+  if (!response.ok) throw new Error('This device could not restore its Firebase identity.');
+  return storeAuthSession(await response.json());
+}
+
+async function ensureAuthenticated(forceRefresh = false) {
+  if (TEST_MODE) return null;
+  if (authPromise) return authPromise;
+
+  authPromise = (async () => {
+    const session = readAuthSession();
+    if (session && !forceRefresh && session.idToken && session.expiresAt > Date.now()) {
+      return session;
+    }
+    if (session?.refreshToken) return refreshAnonymousAccount(session);
+    return createAnonymousAccount();
+  })();
+
+  try {
+    return await authPromise;
+  } finally {
+    authPromise = null;
+  }
+}
+
+async function firebaseRequest(path, options = {}, hasRetried = false) {
+  const session = await ensureAuthenticated();
+  const separator = path.includes('?') ? '&' : '?';
+  const response = await fetch(
+    `${DB_URL}/${path}.json${separator}auth=${encodeURIComponent(session.idToken)}`,
+    options
+  );
+
+  if (response.status === 401 && !hasRetried) {
+    await ensureAuthenticated(true);
+    return firebaseRequest(path, options, true);
+  }
+  return response;
+}
+
+function completedMap(days) {
+  return Object.fromEntries(days.map(day => [String(day), true]));
 }
 
 async function fetchAll() {
@@ -61,19 +154,31 @@ async function fetchAll() {
   }
 
   try {
-    const res  = await fetch(`${DB_URL}/plank.json`);
-    if (!res.ok) throw new Error(`Firebase returned ${res.status}`);
-    const data = await res.json();
+    const [playersResponse, joinResponse] = await Promise.all([
+      firebaseRequest('plank'),
+      firebaseRequest('settings/joinOpen')
+    ]);
+    if (!playersResponse.ok) throw new Error(`Firebase returned ${playersResponse.status}`);
+
+    const data = await playersResponse.json();
+    joinOpen = joinResponse.ok && await joinResponse.json() === true;
     players = [];
     allData = {};
+    playerUids = {};
+    ownedPlayer = null;
+
     if (data && typeof data === 'object') {
-      // Rebuild player list from Firebase keys
-      const names = Object.keys(data).map(k => data[k].name).filter(Boolean);
-      players = names;
-      allData = {};
-      for (const p of players) {
-        const key = playerKey(p);
-        allData[p] = { completed: data[key]?.completed || [] };
+      for (const [uid, record] of Object.entries(data)) {
+        if (!record?.name) continue;
+        const name = record.name;
+        const completed = Object.entries(record.completed || {})
+          .filter(([, isDone]) => isDone === true)
+          .map(([day]) => Number(day))
+          .filter(day => Number.isInteger(day) && day >= 1 && day <= 42);
+        players.push(name);
+        playerUids[name] = uid;
+        allData[name] = { completed };
+        if (uid === authSession.localId) ownedPlayer = name;
       }
     }
     loadState = 'ready';
@@ -88,14 +193,20 @@ async function savePlayer(name, data) {
     return;
   }
 
-  const key = playerKey(name);
   try {
-    await fetch(`${DB_URL}/plank/${key}.json`, {
+    const response = await firebaseRequest(`plank/${authSession.localId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, completed: data.completed })
+      body: JSON.stringify({
+        name,
+        completed: completedMap(data.completed)
+      })
     });
-  } catch(e) { showToast('Save failed — check your connection'); }
+    if (!response.ok) throw new Error(`Firebase rejected the write (${response.status}).`);
+  } catch (error) {
+    showToast(error.message || 'Save failed — check your connection');
+    throw error;
+  }
 }
 
 // ─── JOIN ─────────────────────────────────────────────────────────────────────
@@ -103,18 +214,38 @@ async function joinChallenge() {
   const input = document.getElementById('joinName');
   const name  = input.value.trim();
   if (!name) { showToast('Please enter your name'); return; }
+  if (!TEST_MODE && ownedPlayer) {
+    showToast('This device has already joined the challenge');
+    return;
+  }
+  if (!TEST_MODE && (!hasInvite || !joinOpen)) {
+    showToast('Joining is currently closed');
+    return;
+  }
   if (players.map(p => p.toLowerCase()).includes(name.toLowerCase())) {
     showToast('That name is already taken!'); return;
   }
-  players.push(name);
-  allData[name] = { completed: [] };
-  await savePlayer(name, { completed: [] });
-  if (!ownedPlayer) {
+
+  if (TEST_MODE) {
+    players.push(name);
+    allData[name] = { completed: [] };
+    await savePlayer(name, allData[name]);
+    if (!ownedPlayer) {
+      ownedPlayer = name;
+      localStorage.setItem(TEST_IDENTITY_STORAGE_KEY, name);
+    }
+  } else {
+    try {
+      await savePlayer(name, { completed: [] });
+    } catch {
+      return;
+    }
+    players.push(name);
+    allData[name] = { completed: [] };
     ownedPlayer = name;
-    localStorage.setItem(IDENTITY_STORAGE_KEY, name);
+    playerUids[name] = authSession.localId;
   }
   input.value = '';
-  if (!TEST_MODE) document.getElementById('joinBox').classList.add('hidden');
   renderNames();
   selectPlayer(name);
   showToast('Welcome to the challenge, ' + name + '! 💪');
@@ -123,9 +254,10 @@ async function joinChallenge() {
 function resetTestData() {
   if (!TEST_MODE) return;
   localStorage.removeItem(TEST_STORAGE_KEY);
-  localStorage.removeItem(IDENTITY_STORAGE_KEY);
+  localStorage.removeItem(TEST_IDENTITY_STORAGE_KEY);
   players = [];
   allData = {};
+  playerUids = {};
   currentPlayer = null;
   ownedPlayer = null;
   document.getElementById('playerContent').classList.add('hidden');
@@ -152,14 +284,22 @@ function renderNames() {
   label.classList.toggle('hidden', players.length === 0);
   g.classList.toggle('hidden', players.length === 0);
   status.classList.toggle('hidden', players.length > 0);
+  document.getElementById('joinBox').classList.toggle(
+    'hidden',
+    !(TEST_MODE || (hasInvite && joinOpen && !ownedPlayer && loadState === 'ready'))
+  );
 
   if (players.length === 0) {
-    if (loadState === 'error') {
+    if (loadState === 'config') {
+      status.innerHTML = '<strong>Firebase setup is incomplete.</strong>Add the Web API key and finish the Firebase Console steps in the README.';
+    } else if (loadState === 'error') {
       status.innerHTML = '<strong>We couldn’t load the challenge.</strong>Check your connection and refresh the page.';
     } else if (TEST_MODE) {
       status.innerHTML = '<strong>Your test group is empty.</strong>Add a pretend participant above to get started.';
-    } else if (hasInvite) {
+    } else if (hasInvite && joinOpen) {
       status.innerHTML = '<strong>Be the first to join.</strong>Enter your name above to start the challenge.';
+    } else if (hasInvite && !joinOpen && loadState === 'ready') {
+      status.innerHTML = '<strong>Joining is closed.</strong>Ask the challenge organizer if you still need access.';
     } else {
       status.innerHTML = '<strong>Ready to join the plank challenge?</strong>Open the invitation link you were sent. Once you’ve joined, your name will appear here.';
     }
@@ -179,13 +319,13 @@ function renderNames() {
 }
 
 function selectPlayer(p) {
-  if (!ownedPlayer) {
+  if (TEST_MODE && !ownedPlayer) {
     const confirmed = window.confirm(
       `Use this device as ${p}? You will be able to update ${p}'s progress.`
     );
     if (!confirmed) return;
     ownedPlayer = p;
-    localStorage.setItem(IDENTITY_STORAGE_KEY, p);
+    localStorage.setItem(TEST_IDENTITY_STORAGE_KEY, p);
   }
 
   currentPlayer = p;
@@ -204,7 +344,9 @@ function renderIdentityNote() {
 
   const message = document.createElement('span');
   if (!ownedPlayer) {
-    message.textContent = 'Choose your name. This browser will remember you.';
+    message.textContent = TEST_MODE
+      ? 'Choose a test user. This browser will remember your choice.'
+      : 'This device has not joined. Existing plans are view-only.';
   } else if (currentPlayer && currentPlayer !== ownedPlayer) {
     message.append('Viewing ');
     const name = document.createElement('strong');
@@ -218,14 +360,14 @@ function renderIdentityNote() {
   }
   note.appendChild(message);
 
-  if (ownedPlayer) {
+  if (ownedPlayer && (TEST_MODE || currentPlayer !== ownedPlayer)) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'btn';
     if (currentPlayer && currentPlayer !== ownedPlayer) {
       button.textContent = 'Back to my plan';
       button.addEventListener('click', () => selectPlayer(ownedPlayer));
-    } else {
+    } else if (TEST_MODE) {
       button.textContent = 'Change user';
       button.addEventListener('click', forgetIdentity);
     }
@@ -234,11 +376,12 @@ function renderIdentityNote() {
 }
 
 function forgetIdentity() {
+  if (!TEST_MODE) return;
   const confirmed = window.confirm(
     'Change the user linked to this device? Progress already saved will not be deleted.'
   );
   if (!confirmed) return;
-  localStorage.removeItem(IDENTITY_STORAGE_KEY);
+  localStorage.removeItem(TEST_IDENTITY_STORAGE_KEY);
   ownedPlayer = null;
   currentPlayer = null;
   document.getElementById('playerContent').classList.add('hidden');
@@ -274,21 +417,30 @@ function renderPlan() {
       const isFuture = !isRest && !isDone && dn > maxDone + 1;
       const stateCls = isRest ? 'rest' : isDone ? 'done' : isFuture ? 'future' : 'clickable';
       const cls      = `${stateCls}${canEdit ? '' : ' view-only'}`;
-      const onclick  = canEdit
+      const action = canEdit
         ? isDone
-          ? `onclick="undoDay(${dn})"`
+          ? 'undo'
           : stateCls === 'clickable'
-            ? `onclick="markDay(${dn})"`
+            ? 'mark'
             : ''
         : '';
+      const actionAttributes = action ? `data-action="${action}" data-day="${dn}"` : '';
       const title = canEdit && isDone ? 'Click to undo' : canEdit ? '' : 'View only';
-      html += `<div class="day-card ${cls}" ${onclick} title="${title}">
+      html += `<div class="day-card ${cls}" ${actionAttributes} title="${title}">
         <div><div class="day-num">Day ${dn}</div><div class="day-time">${day.t}</div></div>
         ${isDone ? '<span class="check-icon">✓</span>' : ''}
       </div>`;
     }
   }
-  document.getElementById('planGrid').innerHTML = html;
+  const grid = document.getElementById('planGrid');
+  grid.innerHTML = html;
+  grid.querySelectorAll('[data-action]').forEach(card => {
+    const day = Number(card.dataset.day);
+    card.addEventListener('click', () => {
+      if (card.dataset.action === 'undo') undoDay(day);
+      else markDay(day);
+    });
+  });
 }
 
 function renderGroup() {
@@ -309,7 +461,7 @@ function renderGroup() {
 
 function refreshAll() {
   if (ownedPlayer && !players.includes(ownedPlayer)) {
-    localStorage.removeItem(IDENTITY_STORAGE_KEY);
+    if (TEST_MODE) localStorage.removeItem(TEST_IDENTITY_STORAGE_KEY);
     ownedPlayer = null;
   }
   if (!currentPlayer && ownedPlayer) {
@@ -333,11 +485,17 @@ async function markDay(dn) {
   }
   const data = allData[currentPlayer] || { completed: [] };
   if (data.completed.includes(dn)) return;
+  const previous = [...data.completed];
   data.completed.push(dn);
   allData[currentPlayer] = data;
   renderStats(); renderPlan(); renderGroup();
-  await savePlayer(currentPlayer, data);
-  showToast('Day ' + dn + ' done! 💪');
+  try {
+    await savePlayer(currentPlayer, data);
+    showToast('Day ' + dn + ' done! 💪');
+  } catch {
+    data.completed = previous;
+    renderStats(); renderPlan(); renderGroup();
+  }
 }
 
 async function undoDay(dn) {
@@ -347,11 +505,17 @@ async function undoDay(dn) {
     return;
   }
   const data = allData[currentPlayer] || { completed: [] };
+  const previous = [...data.completed];
   data.completed = data.completed.filter(d => d !== dn);
   allData[currentPlayer] = data;
   renderStats(); renderPlan(); renderGroup();
-  await savePlayer(currentPlayer, data);
-  showToast('Day ' + dn + ' unmarked');
+  try {
+    await savePlayer(currentPlayer, data);
+    showToast('Day ' + dn + ' unmarked');
+  } catch {
+    data.completed = previous;
+    renderStats(); renderPlan(); renderGroup();
+  }
 }
 
 function showTab(tab) {
@@ -417,9 +581,45 @@ function registerServiceWorker() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-checkInvite();
-if (TEST_MODE) document.getElementById('testBanner').classList.remove('hidden');
-if (hasInvite) document.getElementById('joinBox').classList.remove('hidden');
-setupInstallPrompt();
-registerServiceWorker();
-startPolling();
+function connectInterface() {
+  document.getElementById('joinButton').addEventListener('click', joinChallenge);
+  document.getElementById('resetTestButton').addEventListener('click', resetTestData);
+  document.getElementById('joinName').addEventListener('keydown', event => {
+    if (event.key === 'Enter') joinChallenge();
+  });
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => showTab(tab.dataset.tab));
+  });
+}
+
+async function startApp() {
+  checkInvite();
+  connectInterface();
+  setupInstallPrompt();
+  registerServiceWorker();
+  localStorage.removeItem('plank-challenge-player');
+
+  if (TEST_MODE) {
+    joinOpen = true;
+    document.getElementById('testBanner').classList.remove('hidden');
+    startPolling();
+    return;
+  }
+
+  if (!FIREBASE_API_KEY || FIREBASE_API_KEY === 'REPLACE_WITH_FIREBASE_WEB_API_KEY') {
+    loadState = 'config';
+    renderNames();
+    return;
+  }
+
+  try {
+    await ensureAuthenticated();
+    startPolling();
+  } catch (error) {
+    console.error(error);
+    loadState = 'error';
+    renderNames();
+  }
+}
+
+startApp();
