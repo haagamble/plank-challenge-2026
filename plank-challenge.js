@@ -20,10 +20,10 @@ const PLAN = [
 const WEEKS = [
   {label:'Week 1', days:[1,2,3,4,5,6,7]},
   {label:'Week 2', days:[8,9,10,11,12,13,14]},
-  {label:'Week 3', days:[15,16,17,18,19]},
-  {label:'Week 4', days:[20,21,22,23,24,25,26,27]},
-  {label:'Week 5', days:[28,29,30,31,32,33,34]},
-  {label:'Week 6', days:[35,36,37,38,39,40,41,42]}
+  {label:'Week 3', days:[15,16,17,18,19,20,21]},
+  {label:'Week 4', days:[22,23,24,25,26,27,28]},
+  {label:'Week 5', days:[29,30,31,32,33,34,35]},
+  {label:'Week 6', days:[36,37,38,39,40,41,42]}
 ];
 const NON_REST = PLAN.filter(d => d.t !== 'REST').length;
 const MEDALS   = ['🥇','🥈','🥉'];
