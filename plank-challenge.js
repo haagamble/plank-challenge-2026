@@ -28,7 +28,6 @@ const WEEKS = [
   {label:'Week 6', days:[36,37,38,39,40,41,42]}
 ];
 const TOTAL_DAYS = PLAN.length;
-const MEDALS   = ['🥇','🥈','🥉'];
 
 function dateForDay(dayNumber) {
   return new Date(CHALLENGE_START.getTime() + (dayNumber - 1) * ONE_DAY_MS);
@@ -490,13 +489,14 @@ function renderPlan() {
 
 function renderGroup() {
   const sorted = [...players].sort((a,b) => doneCount(b) - doneCount(a));
-  document.getElementById('leaderboard').innerHTML = sorted.map((p, i) => {
+  document.getElementById('leaderboard').innerHTML = sorted.map(p => {
     const done = doneCount(p);
     const pct  = Math.round(done / TOTAL_DAYS * 100);
     const isMe = p === ownedPlayer;
     const safeName = escapeHtml(p);
+    const statusIcon = done >= TOTAL_DAYS ? '🏆' : '💪';
     return `<div class="lb-row${isMe?' me':''}">
-      <div class="lb-rank">${MEDALS[i] || (i+1)}</div>
+      <div class="lb-rank" aria-hidden="true">${statusIcon}</div>
       <div class="lb-name">${safeName}${isMe?' <span style="font-size:12px;font-weight:400;color:var(--accent)">(you)</span>':''}</div>
       <div class="lb-bar-wrap"><div class="lb-bar${pct>=100?' complete':''}" style="width:${pct}%"></div></div>
       <div class="lb-count">${done}/${TOTAL_DAYS}</div>

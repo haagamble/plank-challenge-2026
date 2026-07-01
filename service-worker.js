@@ -1,4 +1,4 @@
-const CACHE_NAME = 'plank-challenge-v10';
+const CACHE_NAME = 'plank-challenge-v11';
 const APP_SHELL = [
   './',
   './index.html',
