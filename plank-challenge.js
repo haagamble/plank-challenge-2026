@@ -27,7 +27,7 @@ const WEEKS = [
   {label:'Week 5', days:[29,30,31,32,33,34,35]},
   {label:'Week 6', days:[36,37,38,39,40,41,42]}
 ];
-const NON_REST = PLAN.filter(d => d.t !== 'REST').length;
+const TOTAL_DAYS = PLAN.length;
 const MEDALS   = ['🥇','🥈','🥉'];
 
 function dateForDay(dayNumber) {
@@ -385,7 +385,7 @@ function renderIdentityNote() {
   if (!ownedPlayer) {
     message.textContent = TEST_MODE
       ? 'Choose a test user. This browser will remember your choice.'
-      : 'This device has not joined. Existing plans are view-only.';
+      : 'You haven’t joined on this device yet. You can view members’ plans, but you can’t update them.';
   } else if (currentPlayer && currentPlayer !== ownedPlayer) {
     message.append('Viewing ');
     const name = document.createElement('strong');
@@ -431,9 +431,9 @@ function doneCount(p) { return (allData[p]?.completed || []).length; }
 
 function renderStats() {
   const done      = doneCount(currentPlayer);
-  const pct       = Math.round(done / NON_REST * 100);
+  const pct       = Math.round(done / TOTAL_DAYS * 100);
   const completed = allData[currentPlayer]?.completed || [];
-  const nextDay   = PLAN.find(d => d.t !== 'REST' && !completed.includes(d.d));
+  const nextDay   = PLAN.find(d => !completed.includes(d.d));
   document.getElementById('statRow').innerHTML = `
     <div class="stat-card"><div class="stat-num">${done}</div><div class="stat-lbl">Days done</div></div>
     <div class="stat-card"><div class="stat-num">${pct}%</div><div class="stat-lbl">Complete</div></div>
@@ -453,18 +453,24 @@ function renderPlan() {
       const day      = PLAN.find(d => d.d === dn);
       const isRest   = day.t === 'REST';
       const isDone   = completed.includes(dn);
-      const isFuture = !isRest && !isDone && dn > maxDone + 1;
-      const stateCls = isRest ? 'rest' : isDone ? 'done' : isFuture ? 'future' : 'clickable';
+      const isFuture = !isDone && dn > maxDone + 1;
+      const stateCls = isDone ? 'done' : isFuture ? 'future' : isRest ? 'rest clickable' : 'clickable';
       const cls      = `${stateCls}${canEdit ? '' : ' view-only'}`;
       const action = canEdit
         ? isDone
           ? 'undo'
-          : stateCls === 'clickable'
+          : !isFuture
             ? 'mark'
             : ''
         : '';
       const actionAttributes = action ? `data-action="${action}" data-day="${dn}"` : '';
-      const title = canEdit && isDone ? 'Click to undo' : canEdit ? '' : 'View only';
+      const title = canEdit && isDone
+        ? 'Click to undo'
+        : canEdit && isRest && !isFuture
+          ? 'Mark rest day complete'
+          : canEdit
+            ? ''
+            : 'View only';
       html += `<div class="day-card ${cls}" ${actionAttributes} title="${title}">
         <div><div class="day-num">Day ${dn} · ${formatDayDate(dn)}</div><div class="day-time">${day.t}</div></div>
         ${isDone ? '<span class="check-icon">✓</span>' : ''}
@@ -486,14 +492,14 @@ function renderGroup() {
   const sorted = [...players].sort((a,b) => doneCount(b) - doneCount(a));
   document.getElementById('leaderboard').innerHTML = sorted.map((p, i) => {
     const done = doneCount(p);
-    const pct  = Math.round(done / NON_REST * 100);
+    const pct  = Math.round(done / TOTAL_DAYS * 100);
     const isMe = p === ownedPlayer;
     const safeName = escapeHtml(p);
     return `<div class="lb-row${isMe?' me':''}">
       <div class="lb-rank">${MEDALS[i] || (i+1)}</div>
       <div class="lb-name">${safeName}${isMe?' <span style="font-size:12px;font-weight:400;color:var(--accent)">(you)</span>':''}</div>
       <div class="lb-bar-wrap"><div class="lb-bar${pct>=100?' complete':''}" style="width:${pct}%"></div></div>
-      <div class="lb-count">${done}/${NON_REST}</div>
+      <div class="lb-count">${done}/${TOTAL_DAYS}</div>
     </div>`;
   }).join('');
 }
@@ -530,7 +536,8 @@ async function markDay(dn) {
   renderStats(); renderPlan(); renderGroup();
   try {
     await savePlayer(currentPlayer, data);
-    showToast('Day ' + dn + ' done! 💪');
+    const isRest = PLAN.find(day => day.d === dn)?.t === 'REST';
+    showToast(isRest ? 'Rest day complete! 💪' : 'Day ' + dn + ' done! 💪');
   } catch {
     data.completed = previous;
     renderStats(); renderPlan(); renderGroup();
@@ -573,12 +580,14 @@ function showToast(msg) {
 // ─── INSTALLABLE APP ──────────────────────────────────────────────────────────
 function setupInstallPrompt() {
   const card = document.getElementById('installCard');
+  const title = document.getElementById('installTitle');
   const button = document.getElementById('installButton');
   const message = document.getElementById('installMessage');
   const isIos = isIosDevice();
   const isStandalone = isStandaloneApp();
 
   if (isIos && !isStandalone && hasInvite) {
+    title.textContent = 'Install the app to join';
     document.getElementById('joinInstructions').textContent =
       'First add this page to your Home Screen. Then open the Plank app and join there.';
     document.getElementById('joinName').disabled = true;
@@ -589,7 +598,7 @@ function setupInstallPrompt() {
   if (localStorage.getItem('plank-install-dismissed') === 'yes') return;
 
   if (isIos) {
-    message.textContent = 'On iPhone, tap Share, then “Add to Home Screen.”';
+    message.textContent = 'Tap Share, then “Add to Home Screen.” Open the app to enter your name.';
     card.classList.remove('hidden');
   }
 
