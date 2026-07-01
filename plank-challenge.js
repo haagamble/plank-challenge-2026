@@ -7,6 +7,8 @@ const TEST_MODE = QUERY_PARAMS.get('test') === '1';
 const TEST_STORAGE_KEY = 'plank-challenge-test-data';
 const TEST_IDENTITY_STORAGE_KEY = 'plank-challenge-test-player';
 const AUTH_STORAGE_KEY = 'plank-challenge-firebase-auth';
+const CHALLENGE_START = new Date(Date.UTC(2026, 6, 1));
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const PLAN = [
   {d:1,t:'0:20'},{d:2,t:'0:20'},{d:3,t:'0:30'},{d:4,t:'0:30'},{d:5,t:'0:45'},{d:6,t:'0:55'},{d:7,t:'REST'},
@@ -28,6 +30,33 @@ const WEEKS = [
 const NON_REST = PLAN.filter(d => d.t !== 'REST').length;
 const MEDALS   = ['🥇','🥈','🥉'];
 
+function dateForDay(dayNumber) {
+  return new Date(CHALLENGE_START.getTime() + (dayNumber - 1) * ONE_DAY_MS);
+}
+
+function formatDayDate(dayNumber) {
+  return new Intl.DateTimeFormat('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC'
+  }).format(dateForDay(dayNumber));
+}
+
+function formatWeekRange(days) {
+  const start = dateForDay(days[0]);
+  const end = dateForDay(days[days.length - 1]);
+  const month = new Intl.DateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' });
+  const startMonth = month.format(start);
+  const endMonth = month.format(end);
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${start.getUTCDate()}–${end.getUTCDate()}`;
+  }
+
+  return `${startMonth} ${start.getUTCDate()}–${endMonth} ${end.getUTCDate()}`;
+}
+
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let players     = [];   // loaded from Firebase
 let currentPlayer = null;
@@ -42,8 +71,18 @@ let authPromise = null;
 let installPrompt = null;
 
 // ─── INVITE CODE CHECK ────────────────────────────────────────────────────────
+function isStandaloneApp() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent);
+}
+
 function checkInvite() {
-  hasInvite = TEST_MODE || QUERY_PARAMS.get('join') === JOIN_CODE;
+  // Installed apps need invitation access even when an older Home Screen icon
+  // opens the root URL without the query string.
+  hasInvite = TEST_MODE || QUERY_PARAMS.get('join') === JOIN_CODE || isStandaloneApp();
 }
 
 // ─── FIREBASE AUTHENTICATION AND REST API ─────────────────────────────────────
@@ -409,7 +448,7 @@ function renderPlan() {
   const canEdit   = currentPlayer === ownedPlayer;
   let html = '';
   for (const wk of WEEKS) {
-    html += `<div class="week-label">${wk.label}</div>`;
+    html += `<div class="week-label">${wk.label} · ${formatWeekRange(wk.days)}</div>`;
     for (const dn of wk.days) {
       const day      = PLAN.find(d => d.d === dn);
       const isRest   = day.t === 'REST';
@@ -427,7 +466,7 @@ function renderPlan() {
       const actionAttributes = action ? `data-action="${action}" data-day="${dn}"` : '';
       const title = canEdit && isDone ? 'Click to undo' : canEdit ? '' : 'View only';
       html += `<div class="day-card ${cls}" ${actionAttributes} title="${title}">
-        <div><div class="day-num">Day ${dn}</div><div class="day-time">${day.t}</div></div>
+        <div><div class="day-num">Day ${dn} · ${formatDayDate(dn)}</div><div class="day-time">${day.t}</div></div>
         ${isDone ? '<span class="check-icon">✓</span>' : ''}
       </div>`;
     }
@@ -533,13 +572,21 @@ function showToast(msg) {
 
 // ─── INSTALLABLE APP ──────────────────────────────────────────────────────────
 function setupInstallPrompt() {
-  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) return;
-  if (localStorage.getItem('plank-install-dismissed') === 'yes') return;
-
   const card = document.getElementById('installCard');
   const button = document.getElementById('installButton');
   const message = document.getElementById('installMessage');
-  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isIos = isIosDevice();
+  const isStandalone = isStandaloneApp();
+
+  if (isIos && !isStandalone && hasInvite) {
+    document.getElementById('joinInstructions').textContent =
+      'First add this page to your Home Screen. Then open the Plank app and join there.';
+    document.getElementById('joinName').disabled = true;
+    document.getElementById('joinButton').disabled = true;
+  }
+
+  if (isStandalone) return;
+  if (localStorage.getItem('plank-install-dismissed') === 'yes') return;
 
   if (isIos) {
     message.textContent = 'On iPhone, tap Share, then “Add to Home Screen.”';

@@ -2,7 +2,7 @@
   "name": "Plank Challenge",
   "short_name": "Plank",
   "description": "Track your six-week plank challenge and cheer on the group.",
-  "start_url": "./",
+  "start_url": "./?join=plank26",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f7f6f3",

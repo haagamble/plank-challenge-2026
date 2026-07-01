@@ -102,10 +102,11 @@ repository.
 
 ## Install on a phone
 
-- **iPhone:** Open the site in Safari, tap **Share**, select
-  **Add to Home Screen**, and enable **Open as Web App**.
+- **iPhone:** Open the invitation link in Safari or Chrome, tap **Share**,
+  select **Add to Home Screen**, and enable **Open as Web App**. Open the new
+  Home Screen app and join the challenge there, not in the browser.
 - **Android:** Open the site in the browser and choose **Install app** or
-  **Add to Home screen**.
+  **Add to Home screen**, then open the installed app and join there.
 
 The interface is cached for quicker loading, but Firebase progress syncing
 still requires an internet connection.
