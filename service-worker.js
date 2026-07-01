@@ -1,4 +1,4 @@
-const CACHE_NAME = 'plank-challenge-v9';
+const CACHE_NAME = 'plank-challenge-v10';
 const APP_SHELL = [
   './',
   './index.html',
@@ -38,7 +38,7 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
 
   event.respondWith(
-    fetch(request)
+    fetch(request, { cache: 'no-store' })
       .then(response => {
         if (response.ok) {
           const copy = response.clone();

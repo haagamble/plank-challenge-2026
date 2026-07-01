@@ -630,8 +630,15 @@ function setupInstallPrompt() {
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./service-worker.js');
+    window.addEventListener('load', async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('./service-worker.js', {
+          updateViaCache: 'none'
+        });
+        await registration.update();
+      } catch (error) {
+        console.error('Service worker update failed', error);
+      }
     });
   }
 }
