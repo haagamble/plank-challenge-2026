@@ -88,6 +88,12 @@
   }
   .name-btn:hover { background: var(--surface2); border-color: var(--accent); }
   .name-btn.active { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); font-weight: 500; }
+  .member-chip {
+    padding: 10px 12px; border-radius: var(--radius);
+    background: var(--surface2); color: var(--text-sub);
+    font-size: 14px; text-align: center;
+  }
+  .member-chip.me { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
   .name-status {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 1.5rem; color: var(--text-sub);

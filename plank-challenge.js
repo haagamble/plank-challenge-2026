@@ -345,18 +345,27 @@ function renderNames() {
 
   g.replaceChildren();
   for (const p of players) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `name-btn${currentPlayer === p ? ' active' : ''}`;
-    button.textContent = p === ownedPlayer ? `${p} (you)` : p;
-    button.addEventListener('click', () => selectPlayer(p));
-    g.appendChild(button);
+    if (TEST_MODE) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `name-btn${currentPlayer === p ? ' active' : ''}`;
+      button.textContent = p === ownedPlayer ? `${p} (you)` : p;
+      button.addEventListener('click', () => selectPlayer(p));
+      g.appendChild(button);
+    } else {
+      const chip = document.createElement('div');
+      chip.className = `member-chip${p === ownedPlayer ? ' me' : ''}`;
+      chip.textContent = p === ownedPlayer ? `${p} (you)` : p;
+      g.appendChild(chip);
+    }
   }
 
   renderIdentityNote();
 }
 
 function selectPlayer(p) {
+  if (!TEST_MODE && p !== ownedPlayer) return;
+
   if (TEST_MODE && !ownedPlayer) {
     const confirmed = window.confirm(
       `Use this device as ${p}? You will be able to update ${p}'s progress.`
@@ -384,7 +393,7 @@ function renderIdentityNote() {
   if (!ownedPlayer) {
     message.textContent = TEST_MODE
       ? 'Choose a test user. This browser will remember your choice.'
-      : 'You haven’t joined on this device yet. You can view members’ plans, but you can’t update them.';
+      : 'You haven’t joined on this device yet. Member names are shown for reference.';
   } else if (currentPlayer && currentPlayer !== ownedPlayer) {
     message.append('Viewing ');
     const name = document.createElement('strong');
