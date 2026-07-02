@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="plank-challenge.css">
 </head>
 <body>
-<div class="app">
+<div class="app" id="appShell">
   <header>
     <h1>💪 Plank challenge</h1>
     <p>6 weeks · 42 days · 5-minute plank</p>
@@ -45,6 +45,14 @@
 
     <div id="playerContent" class="hidden">
       <div class="stat-row" id="statRow"></div>
+      <section class="next-session hidden" id="nextSession" aria-label="Next plank">
+        <div>
+          <span class="next-session-label">Next plank</span>
+          <strong id="nextSessionDay"></strong>
+          <span id="nextSessionDuration"></span>
+        </div>
+        <button class="btn primary" id="nextSessionButton" type="button">Start timer</button>
+      </section>
       <div class="tabs">
         <button class="tab active" data-tab="plan" type="button">My plan</button>
         <button class="tab" data-tab="group" type="button">Group progress</button>
@@ -69,6 +77,20 @@
   </aside>
 </div>
 <div class="toast" id="toast"></div>
+
+<div class="timer-overlay hidden" id="timerOverlay" role="dialog" aria-modal="true" aria-labelledby="timerDay">
+  <div class="timer-panel">
+    <div class="timer-day" id="timerDay"></div>
+    <div class="timer-set hidden" id="timerSet"></div>
+    <div class="timer-status" id="timerStatus" aria-live="polite"></div>
+    <div class="timer-display" id="timerDisplay" aria-live="off">00:00</div>
+    <div class="timer-actions">
+      <button class="btn primary" id="timerPrimaryButton" type="button">Pause</button>
+      <button class="btn primary hidden" id="timerCompleteButton" type="button">Mark complete</button>
+      <button class="btn" id="timerCancelButton" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
 
 <script src="firebase-config.js"></script>
 <script src="plank-challenge.js"></script>

@@ -9,6 +9,7 @@ const TEST_IDENTITY_STORAGE_KEY = 'plank-challenge-test-player';
 const AUTH_STORAGE_KEY = 'plank-challenge-firebase-auth';
 const CHALLENGE_START = new Date(Date.UTC(2026, 6, 1));
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const TIMER_READY_SECONDS = 3;
 
 const PLAN = [
   {d:1,t:'0:20'},{d:2,t:'0:20'},{d:3,t:'0:30'},{d:4,t:'0:30'},{d:5,t:'0:45'},{d:6,t:'0:55'},{d:7,t:'REST'},
@@ -56,6 +57,34 @@ function formatWeekRange(days) {
   return `${startMonth} ${start.getUTCDate()}–${endMonth} ${end.getUTCDate()}`;
 }
 
+function parseSessionTime(value) {
+  const match = String(value).match(/^(?:(\d+)[×x])?(\d+):(\d{2})$/);
+  if (!match) return null;
+
+  return {
+    sets: Number(match[1] || 1),
+    seconds: Number(match[2]) * 60 + Number(match[3])
+  };
+}
+
+function formatDurationWords(seconds) {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  const parts = [];
+  if (minutes) parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`);
+  if (remainingSeconds) {
+    parts.push(`${remainingSeconds} ${remainingSeconds === 1 ? 'second' : 'seconds'}`);
+  }
+  return parts.join(' ') || '0 seconds';
+}
+
+function formatTimerDisplay(milliseconds) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let players     = [];   // loaded from Firebase
 let currentPlayer = null;
@@ -68,6 +97,10 @@ let ownedPlayer = TEST_MODE ? localStorage.getItem(TEST_IDENTITY_STORAGE_KEY) : 
 let authSession = null;
 let authPromise = null;
 let installPrompt = null;
+let timerState = null;
+let timerInterval = null;
+let timerWakeLock = null;
+let timerAudioContext = null;
 
 // ─── INVITE CODE CHECK ────────────────────────────────────────────────────────
 function isStandaloneApp() {
@@ -437,16 +470,48 @@ function forgetIdentity() {
 
 function doneCount(p) { return (allData[p]?.completed || []).length; }
 
+function nextIncompleteDay(player = currentPlayer) {
+  const completed = allData[player]?.completed || [];
+  return PLAN.find(day => !completed.includes(day.d));
+}
+
+function renderNextSession(day) {
+  const card = document.getElementById('nextSession');
+  const canUse = day && currentPlayer === ownedPlayer;
+  card.classList.toggle('hidden', !canUse);
+  if (!canUse) return;
+
+  const label = card.querySelector('.next-session-label');
+  const dayLabel = document.getElementById('nextSessionDay');
+  const durationLabel = document.getElementById('nextSessionDuration');
+  const button = document.getElementById('nextSessionButton');
+
+  dayLabel.textContent = `Day ${day.d}`;
+  if (day.t === 'REST') {
+    label.textContent = 'Next up';
+    durationLabel.textContent = 'Rest day';
+    button.textContent = 'Mark complete';
+    return;
+  }
+
+  const session = parseSessionTime(day.t);
+  label.textContent = 'Next plank';
+  durationLabel.textContent = session.sets > 1
+    ? `${session.sets} sets · ${formatDurationWords(session.seconds)} each`
+    : formatDurationWords(session.seconds);
+  button.textContent = 'Start timer';
+}
+
 function renderStats() {
   const done      = doneCount(currentPlayer);
   const pct       = Math.round(done / TOTAL_DAYS * 100);
-  const completed = allData[currentPlayer]?.completed || [];
-  const nextDay   = PLAN.find(d => !completed.includes(d.d));
+  const nextDay   = nextIncompleteDay();
   document.getElementById('statRow').innerHTML = `
     <div class="stat-card"><div class="stat-num">${done}</div><div class="stat-lbl">Days done</div></div>
     <div class="stat-card"><div class="stat-num">${pct}%</div><div class="stat-lbl">Complete</div></div>
     <div class="stat-card"><div class="stat-num">${nextDay ? 'Day '+nextDay.d : '🎉'}</div><div class="stat-lbl">Up next</div></div>
   `;
+  renderNextSession(nextDay);
 }
 
 function renderPlan() {
@@ -586,6 +651,266 @@ function showToast(msg) {
   t._timer = setTimeout(() => t.classList.remove('show'), 2400);
 }
 
+// ─── PLANK TIMER ───────────────────────────────────────────────────────────────
+function prepareTimerAudio() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  if (!timerAudioContext) timerAudioContext = new AudioContextClass();
+  if (timerAudioContext.state === 'suspended') {
+    timerAudioContext.resume().catch(() => {});
+  }
+}
+
+function playTimerTone(frequency, duration = 0.12, delay = 0) {
+  if (!timerAudioContext) return;
+  const start = timerAudioContext.currentTime + delay;
+  const oscillator = timerAudioContext.createOscillator();
+  const gain = timerAudioContext.createGain();
+  oscillator.frequency.value = frequency;
+  oscillator.type = 'sine';
+  gain.gain.setValueAtTime(0.18, start);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(gain);
+  gain.connect(timerAudioContext.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration);
+}
+
+function playTimerFinishSound() {
+  playTimerTone(660, 0.14, 0);
+  playTimerTone(880, 0.14, 0.18);
+  playTimerTone(1040, 0.22, 0.36);
+  if ('vibrate' in navigator) navigator.vibrate([120, 80, 180]);
+}
+
+async function requestTimerWakeLock() {
+  if (timerWakeLock || !('wakeLock' in navigator)) return;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (!timerState) {
+      await lock.release();
+      return;
+    }
+    timerWakeLock = lock;
+    lock.addEventListener('release', () => {
+      if (timerWakeLock === lock) timerWakeLock = null;
+    });
+  } catch {
+    timerWakeLock = null;
+  }
+}
+
+async function releaseTimerWakeLock() {
+  const lock = timerWakeLock;
+  timerWakeLock = null;
+  if (!lock) return;
+  try {
+    await lock.release();
+  } catch {
+    // The browser may already have released it when the app was backgrounded.
+  }
+}
+
+function clearTimerTick() {
+  clearInterval(timerInterval);
+  timerInterval = null;
+}
+
+function updateTimerSetLabel() {
+  const setLabel = document.getElementById('timerSet');
+  const hasMultipleSets = timerState.totalSets > 1;
+  setLabel.classList.toggle('hidden', !hasMultipleSets);
+  setLabel.textContent = hasMultipleSets
+    ? `Set ${timerState.currentSet} of ${timerState.totalSets}`
+    : '';
+}
+
+function startTimerTicks() {
+  clearTimerTick();
+  timerInterval = setInterval(updateTimerTick, 100);
+}
+
+function startReadyCountdown() {
+  if (!timerState) return;
+  timerState.phase = 'ready';
+  timerState.readyValue = null;
+  timerState.endAt = Date.now() + TIMER_READY_SECONDS * 1000;
+  document.getElementById('timerStatus').textContent = 'Get ready…';
+  document.getElementById('timerPrimaryButton').classList.add('hidden');
+  document.getElementById('timerCompleteButton').classList.add('hidden');
+  document.getElementById('timerCancelButton').textContent = 'Cancel';
+  updateTimerSetLabel();
+  updateTimerTick();
+  startTimerTicks();
+  requestTimerWakeLock();
+}
+
+function beginPlankCountdown() {
+  if (!timerState) return;
+  clearTimerTick();
+  timerState.phase = 'running';
+  timerState.endAt = Date.now() + timerState.remainingMs;
+  document.getElementById('timerStatus').textContent = 'Hold';
+  const primary = document.getElementById('timerPrimaryButton');
+  primary.textContent = 'Pause';
+  primary.classList.remove('hidden');
+  document.getElementById('timerDisplay').textContent = formatTimerDisplay(timerState.remainingMs);
+  playTimerTone(880, 0.2);
+  startTimerTicks();
+  requestTimerWakeLock();
+}
+
+function finishTimerSet() {
+  if (!timerState) return;
+  clearTimerTick();
+  timerState.remainingMs = 0;
+  document.getElementById('timerDisplay').textContent = '00:00';
+  playTimerFinishSound();
+  releaseTimerWakeLock();
+
+  const primary = document.getElementById('timerPrimaryButton');
+  if (timerState.currentSet < timerState.totalSets) {
+    timerState.phase = 'between';
+    document.getElementById('timerStatus').textContent = `Set ${timerState.currentSet} complete`;
+    primary.textContent = `Start set ${timerState.currentSet + 1}`;
+    primary.classList.remove('hidden');
+    return;
+  }
+
+  timerState.phase = 'finished';
+  document.getElementById('timerStatus').textContent = 'Nice work! 💪';
+  primary.classList.add('hidden');
+  document.getElementById('timerCancelButton').textContent = 'Not now';
+  const complete = document.getElementById('timerCompleteButton');
+  complete.textContent = `Mark Day ${timerState.dayNumber} complete`;
+  complete.classList.remove('hidden');
+}
+
+function updateTimerTick() {
+  if (!timerState) return;
+  const remaining = timerState.endAt - Date.now();
+
+  if (timerState.phase === 'ready') {
+    if (remaining <= 0) {
+      beginPlankCountdown();
+      return;
+    }
+    const readyValue = Math.ceil(remaining / 1000);
+    document.getElementById('timerDisplay').textContent = String(readyValue);
+    if (timerState.readyValue !== readyValue) {
+      timerState.readyValue = readyValue;
+      playTimerTone(520, 0.08);
+    }
+    return;
+  }
+
+  if (timerState.phase !== 'running') return;
+  timerState.remainingMs = Math.max(0, remaining);
+  document.getElementById('timerDisplay').textContent = formatTimerDisplay(timerState.remainingMs);
+  if (remaining <= 0) finishTimerSet();
+}
+
+function pausePlankTimer() {
+  if (!timerState || timerState.phase !== 'running') return;
+  timerState.remainingMs = Math.max(0, timerState.endAt - Date.now());
+  timerState.phase = 'paused';
+  clearTimerTick();
+  releaseTimerWakeLock();
+  document.getElementById('timerStatus').textContent = 'Paused';
+  document.getElementById('timerPrimaryButton').textContent = 'Resume';
+}
+
+function resumePlankTimer() {
+  if (!timerState || timerState.phase !== 'paused') return;
+  beginPlankCountdown();
+}
+
+function openPlankTimer(day) {
+  const session = parseSessionTime(day.t);
+  if (!session || currentPlayer !== ownedPlayer) return;
+
+  prepareTimerAudio();
+  timerState = {
+    dayNumber: day.d,
+    totalSets: session.sets,
+    currentSet: 1,
+    durationMs: session.seconds * 1000,
+    remainingMs: session.seconds * 1000,
+    phase: 'ready',
+    endAt: null,
+    readyValue: null,
+    returnFocus: document.activeElement
+  };
+
+  document.getElementById('timerDay').textContent = `Day ${day.d}`;
+  document.getElementById('timerOverlay').classList.remove('hidden');
+  document.getElementById('appShell').inert = true;
+  document.body.classList.add('timer-open');
+  startReadyCountdown();
+  document.getElementById('timerCancelButton').focus();
+}
+
+function closePlankTimer() {
+  if (!timerState) return;
+  const returnFocus = timerState.returnFocus;
+  clearTimerTick();
+  releaseTimerWakeLock();
+  timerState = null;
+  document.getElementById('timerOverlay').classList.add('hidden');
+  document.getElementById('appShell').inert = false;
+  document.body.classList.remove('timer-open');
+  document.getElementById('timerCompleteButton').classList.add('hidden');
+  document.getElementById('timerPrimaryButton').classList.remove('hidden');
+  if (returnFocus instanceof HTMLElement && document.contains(returnFocus)) returnFocus.focus();
+}
+
+function cancelPlankTimer() {
+  if (!timerState) return;
+  if (timerState.phase !== 'finished') {
+    const confirmed = window.confirm('Cancel this timer? Your day will not be marked complete.');
+    if (!confirmed) return;
+  }
+  closePlankTimer();
+}
+
+function handleTimerPrimaryAction() {
+  if (!timerState) return;
+  if (timerState.phase === 'running') {
+    pausePlankTimer();
+  } else if (timerState.phase === 'paused') {
+    resumePlankTimer();
+  } else if (timerState.phase === 'between') {
+    timerState.currentSet += 1;
+    timerState.remainingMs = timerState.durationMs;
+    startReadyCountdown();
+  }
+}
+
+async function completeTimedDay() {
+  if (!timerState || timerState.phase !== 'finished') return;
+  const dayNumber = timerState.dayNumber;
+  closePlankTimer();
+  await markDay(dayNumber);
+}
+
+function handleNextSessionAction() {
+  const day = nextIncompleteDay();
+  if (!day || currentPlayer !== ownedPlayer) return;
+  if (day.t === 'REST') {
+    markDay(day.d);
+  } else {
+    openPlankTimer(day);
+  }
+}
+
+function handleTimerVisibilityChange() {
+  if (!timerState || document.visibilityState !== 'visible') return;
+  if (timerState.phase === 'ready' || timerState.phase === 'running') {
+    updateTimerTick();
+    requestTimerWakeLock();
+  }
+}
+
 // ─── INSTALLABLE APP ──────────────────────────────────────────────────────────
 function setupInstallPrompt() {
   const card = document.getElementById('installCard');
@@ -656,11 +981,19 @@ function registerServiceWorker() {
 function connectInterface() {
   document.getElementById('joinButton').addEventListener('click', joinChallenge);
   document.getElementById('resetTestButton').addEventListener('click', resetTestData);
+  document.getElementById('nextSessionButton').addEventListener('click', handleNextSessionAction);
+  document.getElementById('timerPrimaryButton').addEventListener('click', handleTimerPrimaryAction);
+  document.getElementById('timerCancelButton').addEventListener('click', cancelPlankTimer);
+  document.getElementById('timerCompleteButton').addEventListener('click', completeTimedDay);
   document.getElementById('joinName').addEventListener('keydown', event => {
     if (event.key === 'Enter') joinChallenge();
   });
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => showTab(tab.dataset.tab));
+  });
+  document.addEventListener('visibilitychange', handleTimerVisibilityChange);
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && timerState) cancelPlankTimer();
   });
 }
 

@@ -7,6 +7,7 @@ their phone like an app.
 ## Features
 
 - 42-day plank schedule with rest days
+- Built-in countdown timer for each participant's next incomplete day
 - Shared progress stored in Firebase Realtime Database
 - Group leaderboard
 - Anonymous Firebase identity with owner-only writes

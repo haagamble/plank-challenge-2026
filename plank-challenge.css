@@ -125,6 +125,21 @@
   .stat-num { font-size: 24px; font-weight: 600; }
   .stat-lbl { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
+  /* Next session */
+  .next-session {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: var(--accent-bg); border: 1px solid var(--accent-border);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 1.5rem;
+  }
+  .next-session > div { display: grid; gap: 2px; }
+  .next-session-label {
+    color: var(--accent); font-size: 11px; font-weight: 600;
+    letter-spacing: .07em; text-transform: uppercase;
+  }
+  .next-session strong { color: var(--text); font-size: 18px; }
+  .next-session #nextSessionDuration { color: var(--text-sub); font-size: 13px; }
+  .next-session .btn { flex-shrink: 0; }
+
   /* Plan grid */
   .plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; }
   .week-label { grid-column: 1/-1; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em; padding-top: 8px; }
@@ -168,6 +183,31 @@
     display: none; z-index: 999; white-space: nowrap;
   }
   .toast.show { display: block; }
+
+  /* Timer */
+  body.timer-open { overflow: hidden; }
+  .timer-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    min-height: 100vh; min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+  }
+  .timer-panel { width: min(100%, 520px); text-align: center; }
+  .timer-day {
+    color: var(--accent); font-size: 14px; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+  }
+  .timer-set { color: var(--text-sub); font-size: 14px; margin-top: 8px; }
+  .timer-status { color: var(--text); font-size: 24px; font-weight: 600; margin-top: 24px; min-height: 36px; }
+  .timer-display {
+    color: var(--text); font-size: clamp(72px, 24vw, 132px);
+    font-variant-numeric: tabular-nums; font-weight: 600;
+    letter-spacing: -.05em; line-height: 1; margin: 28px 0 40px;
+  }
+  .timer-actions { display: flex; justify-content: center; gap: 12px; }
+  .timer-actions .btn { justify-content: center; min-width: 120px; min-height: 48px; font-size: 16px; }
+
   .install-card {
     position: relative; display: flex; align-items: center; gap: 12px;
     background: var(--surface); border: 1px solid var(--border);
@@ -186,4 +226,8 @@
 
   @media (max-width: 480px) {
     .install-card { align-items: flex-start; flex-wrap: wrap; }
+    .next-session { align-items: flex-end; }
+    .next-session .btn { padding-inline: 14px; }
+    .timer-actions { flex-direction: column; }
+    .timer-actions .btn { width: 100%; }
   }
